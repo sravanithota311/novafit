@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "name": "1. Build index (ingest.py)", "type": "debugpy", "request": "launch",
+      "program": "${workspaceFolder}/ingest.py", "console": "integratedTerminal", "cwd": "${workspaceFolder}" },
+    { "name": "2. Run app", "type": "debugpy", "request": "launch",
+      "module": "streamlit", "args": ["run", "app.py"], "console": "integratedTerminal", "cwd": "${workspaceFolder}" },
+    { "name": "Run API (uvicorn)", "type": "debugpy", "request": "launch",
+      "module": "uvicorn", "args": ["api:app", "--reload"], "console": "integratedTerminal", "cwd": "${workspaceFolder}" }
+  ]
+}
