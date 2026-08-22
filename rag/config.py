@@ -59,8 +59,8 @@ def _resolve_gemini_models(chat_override: str, embed_override: str):
     If the user explicitly set names, respect them. Otherwise ask the API which
     models are available and choose good ones, with hard fallbacks.
     """
-    chat_fallback = chat_override or "gemini-2.0-flash"
-    embed_fallback = embed_override or "models/text-embedding-004"
+    chat_fallback = chat_override or "gemini-2.5-flash"
+    embed_fallback = embed_override or "models/gemini-embedding-001"
 
     # If both are explicitly provided, trust them.
     if chat_override and embed_override:
@@ -105,8 +105,8 @@ if LLM_PROVIDER == "gemini" and GOOGLE_API_KEY:
         GEMINI_MODEL, GEMINI_EMBED_MODEL
     )
 else:
-    GEMINI_MODEL = GEMINI_MODEL or "gemini-2.0-flash"
-    GEMINI_EMBED_MODEL = GEMINI_EMBED_MODEL or "models/text-embedding-004"
+    GEMINI_MODEL = GEMINI_MODEL or "gemini-2.5-flash"
+    GEMINI_EMBED_MODEL = GEMINI_EMBED_MODEL or "models/gemini-embedding-001"
 
 # --- Shared behavior ---------------------------------------------------------
 KEEP_ALIVE = _get("KEEP_ALIVE", "10m")
