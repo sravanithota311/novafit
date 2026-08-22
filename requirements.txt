@@ -1,11 +1,9 @@
-# Local development: everything in requirements.txt PLUS the packages needed
-# to run the model locally with Ollama and local embeddings.
--r requirements.txt
-
-langchain-ollama>=0.2
-langchain-huggingface>=0.1
-sentence-transformers>=3.0
-
-# Optional: run the FastAPI service locally
-fastapi>=0.110
-uvicorn>=0.30
+langchain>=0.3,<0.4
+langchain-community>=0.3,<0.4
+langchain-google-genai>=2.0
+langchain-text-splitters>=0.3
+faiss-cpu>=1.8
+pypdf>=5.0
+ddgs>=6.0
+streamlit>=1.37
+python-dotenv>=1.0
