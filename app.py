@@ -154,10 +154,15 @@ def persist_current_chat():
     store.save_chat(st.session_state.user_name, chat)
 
 
-# --- Guard: index must exist -------------------------------------------------
+# --- Ensure the index exists (build it on first run, e.g. in the cloud) ------
 if not Path(INDEX_DIR).exists():
-    st.error("The assistant isn't set up yet. Please contact the administrator.")
-    st.stop()
+    with st.spinner("Setting up the knowledge base for the first time…"):
+        try:
+            from rag.ingest import build_index
+            build_index()
+        except Exception as e:
+            st.error(f"Setup failed: {e}")
+            st.stop()
 
 if "uploads_version" not in st.session_state:
     st.session_state.uploads_version = 0
