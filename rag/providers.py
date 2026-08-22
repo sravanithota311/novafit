@@ -45,17 +45,8 @@ def get_embeddings():
     IMPORTANT: the index must be built and queried with the same embeddings,
     so this is used both in ingest and in the agent.
     """
-    if LLM_PROVIDER == "gemini":
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        # Ensure the name has the required "models/" prefix. Some library
-        # versions mangle a bare name into a non-existent default.
-        model_name = GEMINI_EMBED_MODEL
-        if not model_name.startswith("models/"):
-            model_name = f"models/{model_name}"
-        return GoogleGenerativeAIEmbeddings(
-            model=model_name,
-            google_api_key=GOOGLE_API_KEY,
-        )
-    # default: local HuggingFace
+    # Embeddings ALWAYS run locally via HuggingFace — even when the chat model
+    # is Gemini. This avoids cloud embedding-model/version issues entirely and
+    # keeps the index consistent across local and cloud.
     from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(model_name=EMBED_MODEL)
