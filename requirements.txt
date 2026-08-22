@@ -1,13 +1,14 @@
-# Cloud/deployment requirements (lean — used by Streamlit Community Cloud).
-# For LOCAL use with Ollama, also install requirements-local.txt.
+# Deployment requirements (Streamlit Community Cloud).
+# Uses Gemini for chat and local HuggingFace embeddings (no cloud embedding API).
 
 langchain>=0.3,<0.4
 langchain-community>=0.3,<0.4
-langchain-google-genai>=2.1
-google-generativeai>=0.8
+langchain-google-genai>=2.0,<2.2
+langchain-huggingface>=0.1
 langchain-text-splitters>=0.3
 
 faiss-cpu>=1.8
+sentence-transformers>=3.0
 pypdf>=5.0
 
 # Web search tool (free, no API key)
