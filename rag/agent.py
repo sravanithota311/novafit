@@ -16,20 +16,16 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
 
 from rag.config import (
     ASSISTANT_NAME,
     INDEX_DIR,
-    KEEP_ALIVE,
     KNOWLEDGE_BASE_TOPIC,
-    LLM_MODEL,
     MAX_WEB_RESULTS,
-    OLLAMA_BASE_URL,
-    TEMPERATURE,
     TOP_K,
 )
-from rag.ingest import build_embeddings
+from rag.ingest import ensure_index
+from rag.providers import get_chat_model, get_embeddings
 from rag.uploads import load_uploads_retriever
 
 # The DuckDuckGo library was renamed from `duckduckgo_search` to `ddgs`.
@@ -65,12 +61,10 @@ class Agent:
     """Tool-calling agent over a knowledge base (+ uploads) and web search."""
 
     def __init__(self, embeddings=None) -> None:
-        if not Path(INDEX_DIR).exists():
-            raise FileNotFoundError(
-                f"No index found at {INDEX_DIR}. Run `python ingest.py` first."
-            )
+        # Build the index automatically if it's missing (e.g. first cloud run).
+        ensure_index()
 
-        embeddings = embeddings or build_embeddings()
+        embeddings = embeddings or get_embeddings()
         base_vs = FAISS.load_local(
             str(INDEX_DIR), embeddings, allow_dangerous_deserialization=True
         )
@@ -81,12 +75,7 @@ class Agent:
         self._doc_sources: list = []
         self._web_sources: list = []
 
-        llm = ChatOllama(
-            model=LLM_MODEL,
-            base_url=OLLAMA_BASE_URL,
-            temperature=TEMPERATURE,
-            keep_alive=KEEP_ALIVE,
-        )
+        llm = get_chat_model()
 
         tools = self._build_tools()
         prompt = ChatPromptTemplate.from_messages([

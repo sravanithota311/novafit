@@ -1,9 +1,9 @@
 """Build the searchable index: load -> split -> embed -> store.
 
-Reads every supported file in DATA_DIR, splits it into chunks, embeds them with
-a local HuggingFace model, and saves a FAISS index to INDEX_DIR.
+Uses whichever embedding model the configured provider supplies (local
+HuggingFace or cloud Gemini), so the index always matches the query side.
 
-Run it whenever your documents change:  python ingest.py
+Run manually with:  python ingest.py
 """
 from __future__ import annotations
 
@@ -11,28 +11,20 @@ from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from rag.config import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
-    DATA_DIR,
-    EMBED_MODEL,
-    INDEX_DIR,
-)
+from rag.config import CHUNK_OVERLAP, CHUNK_SIZE, DATA_DIR, INDEX_DIR
+from rag.providers import get_embeddings
 
 SUPPORTED = {".txt": TextLoader, ".md": TextLoader, ".pdf": PyPDFLoader}
 
 
 def load_documents(data_dir: Path) -> list:
-    """Load every supported file in data_dir into LangChain Documents."""
     docs = []
     files = sorted(p for p in data_dir.rglob("*") if p.suffix.lower() in SUPPORTED)
     if not files:
         raise FileNotFoundError(
-            f"No documents found in {data_dir}. "
-            f"Add .md, .txt, or .pdf files and re-run."
+            f"No documents found in {data_dir}. Add .md, .txt, or .pdf files."
         )
     for path in files:
         loader_cls = SUPPORTED[path.suffix.lower()]
@@ -47,18 +39,12 @@ def load_documents(data_dir: Path) -> list:
     return docs
 
 
-def build_embeddings() -> HuggingFaceEmbeddings:
-    """The local embedding model. Reused in ingest AND at query time.
-
-    Using the SAME embedding model in both phases is essential — otherwise the
-    question vectors and document vectors live in different spaces and
-    retrieval returns nonsense.
-    """
-    return HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+# Kept for backward compatibility; other modules may import this name.
+def build_embeddings():
+    return get_embeddings()
 
 
 def build_index() -> Path:
-    """Full indexing pipeline. Returns the path to the saved index."""
     print(f"Loading documents from {DATA_DIR} ...")
     docs = load_documents(DATA_DIR)
 
@@ -69,16 +55,20 @@ def build_index() -> Path:
     chunks = splitter.split_documents(docs)
     print(f"  {len(chunks)} chunks created")
 
-    print(f"Embedding with {EMBED_MODEL} (first run downloads the model) ...")
-    embeddings = build_embeddings()
-
-    print("Building FAISS index ...")
+    print("Embedding and building FAISS index ...")
+    embeddings = get_embeddings()
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
     vectorstore.save_local(str(INDEX_DIR))
     print(f"Done. Index saved to {INDEX_DIR}")
     return INDEX_DIR
+
+
+def ensure_index() -> None:
+    """Build the index if it doesn't exist yet (used on cloud first-run)."""
+    if not Path(INDEX_DIR).exists():
+        build_index()
 
 
 if __name__ == "__main__":
