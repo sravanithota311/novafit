@@ -13,7 +13,7 @@ import streamlit as st
 
 from rag.config import ASSISTANT_NAME, INDEX_DIR
 from rag.agent import Agent
-from rag.ingest import build_embeddings
+from rag.providers import get_embeddings
 from rag import store
 from rag import uploads
 
@@ -102,15 +102,15 @@ EXAMPLES = [
 
 # --- Cached resources --------------------------------------------------------
 @st.cache_resource(show_spinner=False)
-def get_embeddings():
-    return build_embeddings()
+def get_embeddings_cached():
+    return get_embeddings()
 
 
 @st.cache_resource(show_spinner="Waking up the assistant...")
 def get_bot(uploads_version: int) -> Agent:
     # uploads_version is part of the cache key: bumping it rebuilds the agent
     # so newly uploaded documents become searchable.
-    return Agent(embeddings=get_embeddings())
+    return Agent(embeddings=get_embeddings_cached())
 
 
 def stream_words(text: str):
@@ -246,7 +246,7 @@ with st.sidebar:
         if st.button("Add to knowledge base", use_container_width=True):
             with st.spinner("Indexing your document…"):
                 path = uploads.save_upload(up.name, up.getvalue())
-                added = uploads.add_to_index(path, get_embeddings())
+                added = uploads.add_to_index(path, get_embeddings_cached())
             if added:
                 st.session_state.uploads_version += 1  # rebuild the agent
                 st.success(f"Added '{up.name}' ({added} chunks).")
