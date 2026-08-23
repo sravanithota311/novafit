@@ -75,15 +75,21 @@ class Agent:
 
     def _web_search(self, query: str):
         web_sources, lines = [], []
+        results = []
         try:
             with DDGS() as ddgs:
+                # Try a couple of backends; datacenter IPs sometimes get thin
+                # results from the default one.
                 results = list(ddgs.text(query, max_results=MAX_WEB_RESULTS))
+                if not results:
+                    results = list(ddgs.text(query, max_results=MAX_WEB_RESULTS,
+                                             backend="html"))
         except Exception as exc:
             return f"Web search failed: {exc}", []
         for r in results:
             title = r.get("title", "")
-            body = r.get("body", "")
-            href = r.get("href", "")
+            body = r.get("body", "") or r.get("snippet", "")
+            href = r.get("href", "") or r.get("url", "")
             web_sources.append({"title": title, "url": href})
             lines.append(f"{title}\n{body}\n({href})")
         return "\n\n".join(lines), web_sources
@@ -121,8 +127,10 @@ class Agent:
             web_system = (
                 f"You are {ASSISTANT_NAME}, a helpful assistant chatting with a "
                 f"user named {user_name}. Answer the question using the web "
-                "search results below. Be concise and accurate. If the results "
-                "don't answer it, say you don't know.\n\n"
+                "search results below (titles, snippets, and links). Use the "
+                "information available even if partial, summarize what the "
+                "results say, and mention the most relevant source. Only say you "
+                "don't know if the results are truly empty or irrelevant.\n\n"
                 f"Web results:\n{web_context}"
             )
             answer = self._answer(web_system, history, question)
