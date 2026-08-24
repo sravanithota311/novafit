@@ -1,14 +1,14 @@
 """The assistant core — tool-free routing (works on any model, incl. Gemini).
 
-Instead of LLM function-calling (which newer Gemini models reject without a
-"thought_signature"), we route manually:
+Routing priority for each question:
+  1. If the user has uploaded documents, search those FIRST and answer from
+     them when they're relevant (uploads take priority).
+  2. Otherwise (or if uploads don't cover it), search the built-in knowledge
+     base.
+  3. If neither has the answer, fall back to a web search.
 
-  1. Retrieve from the knowledge base and try to answer from it.
-  2. If the answer isn't in the documents, the model replies SEARCH_WEB,
-     and we do a web search and answer from that instead.
-
-This keeps the same behavior (documents first, web fallback, cited sources,
-conversation memory) with plain LLM calls that work everywhere.
+All done with plain LLM calls (no function-calling), so it works on Ollama and
+on newer Gemini models alike.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from rag.uploads import load_uploads_retriever
 
 try:
     from ddgs import DDGS
-except ImportError:  # older installs
+except ImportError:
     from duckduckgo_search import DDGS  # type: ignore
 
 
@@ -38,7 +38,7 @@ WEB_SENTINEL = "SEARCH_WEB"
 
 
 class Agent:
-    """Documents-first assistant with a web fallback — no function-calling."""
+    """Uploads-first, then knowledge base, then web — no function-calling."""
 
     def __init__(self, embeddings=None) -> None:
         ensure_index()
@@ -61,25 +61,23 @@ class Agent:
                 msgs.append(AIMessage(content=turn["content"]))
         return msgs
 
-    def _kb_search(self, query: str):
-        docs = list(self._base_retriever.invoke(query))
-        if self._uploads_retriever is not None:
-            docs += list(self._uploads_retriever.invoke(query))
-        sources = [{
+    @staticmethod
+    def _to_sources(docs) -> list:
+        return [{
             "source": d.metadata.get("source", "unknown"),
             "page": d.metadata.get("page"),
             "snippet": d.page_content[:300].strip(),
         } for d in docs]
+
+    def _retrieve(self, retriever, query: str):
+        docs = list(retriever.invoke(query))
         context = "\n\n".join(d.page_content for d in docs)
-        return context, sources
+        return context, self._to_sources(docs)
 
     def _web_search(self, query: str):
-        web_sources, lines = [], []
-        results = []
+        web_sources, lines, results = [], [], []
         try:
             with DDGS() as ddgs:
-                # Try a couple of backends; datacenter IPs sometimes get thin
-                # results from the default one.
                 results = list(ddgs.text(query, max_results=MAX_WEB_RESULTS))
                 if not results:
                     results = list(ddgs.text(query, max_results=MAX_WEB_RESULTS,
@@ -101,52 +99,61 @@ class Agent:
         resp = self._llm.invoke(messages)
         return (resp.content or "").strip()
 
+    def _answer_from_docs(self, context: str, history, question, user_name,
+                          label: str) -> str:
+        system = (
+            f"You are {ASSISTANT_NAME}, a helpful assistant chatting with a user "
+            f"named {user_name}. Below is content from {label}. "
+            "Answer the user's question using ONLY this content. If it does not "
+            f"contain the answer, reply with exactly '{WEB_SENTINEL}' and nothing "
+            f"else.\n\nContent:\n{context if context else '(nothing found)'}"
+        )
+        return self._answer(system, history, question)
+
     # --- main entry ----------------------------------------------------------
     def run_stream(self, question: str, history: list[dict] | None = None,
                    user_name: str = "there"):
         history = history or []
 
-        # Step 1: try the knowledge base.
-        yield {"type": "tool", "name": "search_knowledge_base"}
-        kb_context, doc_sources = self._kb_search(question)
-
-        kb_system = (
-            f"You are {ASSISTANT_NAME}, a helpful assistant chatting with a user "
-            f"named {user_name}. The knowledge base covers {KNOWLEDGE_BASE_TOPIC}.\n"
-            "Answer the user's question using ONLY the context below. "
-            f"If the context does not contain the answer, reply with exactly "
-            f"'{WEB_SENTINEL}' and nothing else.\n\n"
-            f"Context:\n{kb_context if kb_context else '(no documents found)'}"
-        )
-        answer = self._answer(kb_system, history, question)
-
-        # Step 2: web fallback if the KB couldn't answer.
-        if WEB_SENTINEL in answer.upper() and len(answer.strip()) <= 40:
-            yield {"type": "tool", "name": "search_the_web"}
-            web_context, web_sources = self._web_search(question)
-            web_system = (
-                f"You are {ASSISTANT_NAME}, a helpful assistant chatting with a "
-                f"user named {user_name}. Answer the question using the web "
-                "search results below (titles, snippets, and links). Use the "
-                "information available even if partial, summarize what the "
-                "results say, and mention the most relevant source. Only say you "
-                "don't know if the results are truly empty or irrelevant.\n\n"
-                f"Web results:\n{web_context}"
+        # Step 1: uploaded documents take priority (if any exist).
+        if self._uploads_retriever is not None:
+            yield {"type": "tool", "name": "search_knowledge_base"}
+            up_context, up_sources = self._retrieve(self._uploads_retriever, question)
+            answer = self._answer_from_docs(
+                up_context, history, question, user_name,
+                "the user's uploaded documents",
             )
-            answer = self._answer(web_system, history, question)
-            yield {
-                "type": "final",
-                "answer": answer,
-                "doc_sources": [],
-                "web_sources": web_sources,
-            }
-        else:
-            yield {
-                "type": "final",
-                "answer": answer,
-                "doc_sources": doc_sources,
-                "web_sources": [],
-            }
+            if not (WEB_SENTINEL in answer.upper() and len(answer.strip()) <= 40):
+                yield {"type": "final", "answer": answer,
+                       "doc_sources": up_sources, "web_sources": []}
+                return  # answered from uploads — done
+
+        # Step 2: built-in knowledge base.
+        yield {"type": "tool", "name": "search_knowledge_base"}
+        kb_context, kb_sources = self._retrieve(self._base_retriever, question)
+        answer = self._answer_from_docs(
+            kb_context, history, question, user_name,
+            f"a knowledge base about {KNOWLEDGE_BASE_TOPIC}",
+        )
+        if not (WEB_SENTINEL in answer.upper() and len(answer.strip()) <= 40):
+            yield {"type": "final", "answer": answer,
+                   "doc_sources": kb_sources, "web_sources": []}
+            return
+
+        # Step 3: web fallback.
+        yield {"type": "tool", "name": "search_the_web"}
+        web_context, web_sources = self._web_search(question)
+        web_system = (
+            f"You are {ASSISTANT_NAME}, a helpful assistant chatting with a user "
+            f"named {user_name}. Answer the question using the web search results "
+            "below (titles, snippets, links). Use the available information even "
+            "if partial, summarize what the results say, and mention the most "
+            "relevant source. Only say you don't know if the results are truly "
+            f"empty or irrelevant.\n\nWeb results:\n{web_context}"
+        )
+        answer = self._answer(web_system, history, question)
+        yield {"type": "final", "answer": answer,
+               "doc_sources": [], "web_sources": web_sources}
 
     def ask(self, question: str, history: list[dict] | None = None,
             user_name: str = "there") -> dict:
